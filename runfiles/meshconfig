@@ -66,13 +66,13 @@ sim_count          = 1;
 //topoogy
 
 topology = mesh;
-k  = 8;
+k  = 4;
 n  = 2;
 //
 // Routing
 
 
-routing_function = dor;
+routing_function = xy_yx;
 
 packet_size = 1;
 

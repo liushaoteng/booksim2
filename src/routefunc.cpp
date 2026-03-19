@@ -677,6 +677,78 @@ void dim_order_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *
   outputs->AddRange( out_port, vcBegin, vcEnd );
 }
 
+
+
+void hypercube_on_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
+{
+  // 1. Standard Virtual Channel setup
+  int vcBegin = 0, vcEnd = gNumVCs-1;
+  if ( f->type == Flit::READ_REQUEST )      { vcBegin = gReadReqBeginVC;    vcEnd = gReadReqEndVC;    }
+  else if ( f->type == Flit::WRITE_REQUEST ){ vcBegin = gWriteReqBeginVC;   vcEnd = gWriteReqEndVC;   }
+  else if ( f->type == Flit::READ_REPLY )   { vcBegin = gReadReplyBeginVC;  vcEnd = gReadReplyEndVC;  }
+  else if ( f->type == Flit::WRITE_REPLY )  { vcBegin = gWriteReplyBeginVC; vcEnd = gWriteReplyEndVC; }
+  assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
+
+  int out_port;
+
+  if (inject) {
+    out_port = -1;
+  } else {
+    int cur = r->GetID();
+    int dest = f->dest;
+
+    if (cur == dest) {
+      out_port = 2 * gN; // Eject
+    } else {
+      out_port = -1;
+      int cur_x = cur % gK;
+      int cur_y = cur / gK;
+
+      // 2. The routing algorithm: Check bits from lowest (0) to highest (3)
+      for (int bit = 0; bit < 4; ++bit) {
+        int dest_bit = (dest >> bit) & 1;
+        int cur_bit  = (cur >> bit) & 1;
+
+        if (cur_bit != dest_bit) {
+          // Look for an immediate physical mesh neighbor whose bit matches the destination bit
+          
+          // Check Right (Port 0)
+          if (cur_x < gK - 1) {
+            int right_neighbor = cur + 1;
+            if (((right_neighbor >> bit) & 1) == dest_bit) { out_port = 0; break; }
+          }
+          // Check Left (Port 1)
+          if (cur_x > 0) {
+            int left_neighbor = cur - 1;
+            if (((left_neighbor >> bit) & 1) == dest_bit)  { out_port = 1; break; }
+          }
+          // Check Down (Port 2) - Note: In Booksim, Y dimension advances by +gK
+          if (cur_y < gK - 1) {
+            int down_neighbor = cur + gK;
+            if (((down_neighbor >> bit) & 1) == dest_bit)  { out_port = 2; break; }
+          }
+          // Check Up (Port 3) - Note: In Booksim, Y dimension steps back by -gK
+          if (cur_y > 0) {
+            int up_neighbor = cur - gK;
+            if (((up_neighbor >> bit) & 1) == dest_bit)    { out_port = 3; break; }
+          }
+        }
+      }
+
+      // 3. Fallback mechanism
+      // If we couldn't resolve the differing bit using immediate neighbors
+      // (which can happen depending on how exactly node IDs are mapped - 
+      // e.g. standard row-major vs gray-code), we fall back to DOR to keep it moving.
+      if (out_port == -1) {
+        out_port = dor_next_mesh(cur, dest);
+      }
+    }
+  }
+
+  outputs->Clear();
+  outputs->AddRange( out_port, vcBegin, vcEnd );
+}
+
 //=============================================================
 
 void dim_order_ni_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
@@ -1914,6 +1986,66 @@ void chaos_mesh( const Router *r, const Flit *f,
 
 //=============================================================
 
+void hypercube_on_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
+{
+  int vcBegin = 0, vcEnd = gNumVCs-1;
+  if ( f->type == Flit::READ_REQUEST )      { vcBegin = gReadReqBeginVC;    vcEnd = gReadReqEndVC;    }
+  else if ( f->type == Flit::WRITE_REQUEST ){ vcBegin = gWriteReqBeginVC;   vcEnd = gWriteReqEndVC;   }
+  else if ( f->type == Flit::READ_REPLY )   { vcBegin = gReadReplyBeginVC;  vcEnd = gReadReplyEndVC;  }
+  else if ( f->type == Flit::WRITE_REPLY )  { vcBegin = gWriteReplyBeginVC; vcEnd = gWriteReplyEndVC; }
+  assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
+
+  int out_port;
+
+  if (inject) {
+    out_port = -1;
+  } else {
+    int cur = r->GetID();
+    int dest = f->dest;
+
+    if (cur == dest) {
+      out_port = 2 * gN; // Eject
+    } else {
+      out_port = -1;
+      int cur_x = cur % gK;
+      int cur_y = cur / gK;
+
+      for (int bit = 0; bit < 4; ++bit) {
+        int dest_bit = (dest >> bit) & 1;
+        int cur_bit  = (cur >> bit) & 1;
+
+        if (cur_bit != dest_bit) {
+          if (cur_x < gK - 1) {
+            int right_neighbor = cur + 1;
+            if (((right_neighbor >> bit) & 1) == dest_bit) { out_port = 0; break; }
+          }
+          if (cur_x > 0) {
+            int left_neighbor = cur - 1;
+            if (((left_neighbor >> bit) & 1) == dest_bit)  { out_port = 1; break; }
+          }
+          if (cur_y < gK - 1) {
+            int down_neighbor = cur + gK;
+            if (((down_neighbor >> bit) & 1) == dest_bit)  { out_port = 2; break; }
+          }
+          if (cur_y > 0) {
+            int up_neighbor = cur - gK;
+            if (((up_neighbor >> bit) & 1) == dest_bit)    { out_port = 3; break; }
+          }
+        }
+      }
+
+      if (out_port == -1) {
+        out_port = dor_next_mesh(cur, dest);
+      }
+    }
+  }
+
+  outputs->Clear();
+  outputs->AddRange( out_port, vcBegin, vcEnd );
+}
+
+//=============================================================
+
 void InitializeRoutingMap( const Configuration & config )
 {
 
@@ -1993,6 +2125,8 @@ void InitializeRoutingMap( const Configuration & config )
   gRoutingFunctionMap["valiant_ni_torus"] = &valiant_ni_torus;
 
   gRoutingFunctionMap["dest_tag_fly"] = &dest_tag_fly;
+
+  gRoutingFunctionMap["hypercube_on_mesh"] = &hypercube_on_mesh;
 
   gRoutingFunctionMap["chaos_mesh"]  = &chaos_mesh;
   gRoutingFunctionMap["chaos_torus"] = &chaos_torus;
