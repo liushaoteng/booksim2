@@ -98,6 +98,24 @@ int Stats::NumSamples( ) const
   return _num_samples;
 }
 
+double Stats::Percentile( double p ) const
+{
+  if (_num_samples == 0) return 0.0;
+  if (p <= 0.0) return _min;
+  if (p >= 1.0) return _max;
+
+  int target = (int)ceil(p * _num_samples);
+  int sum = 0;
+  for (int b = 0; b < _num_bins; ++b) {
+    sum += _hist[b];
+    if (sum >= target) {
+      // return the mid-point of the bin that hits the percentile
+      return (b + 0.5) * _bin_size;
+    }
+  }
+  return _max;
+}
+
 void Stats::AddSample( double val )
 {
   ++_num_samples;

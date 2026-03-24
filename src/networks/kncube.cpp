@@ -39,6 +39,8 @@
 #include "kncube.hpp"
 #include "random_utils.hpp"
 #include "misc_utils.hpp"
+#include "globals.hpp"
+#include <fstream>
  //#include "iq_router.hpp"
 
 
@@ -84,6 +86,35 @@ void KNCube::_BuildNet( const Configuration &config )
   bool use_noc_latency;
   use_noc_latency = (config.GetInt("use_noc_latency")==1);
   
+  string mapping_file = config.GetStr("node_mapping_file");
+  vector<int> node_map(_size);
+  for(int i=0; i<_size; ++i) node_map[i] = i; 
+  if(mapping_file != "") {
+    ifstream in(mapping_file.c_str());
+    if(!in.is_open()) {
+      Error("Could not open node mapping file: " + mapping_file);
+    }
+    for(int i=0; i<_size; ++i) {
+      if(!(in >> node_map[i])) {
+        Error("Error reading node mapping file (not enough entries).");
+      }
+    }
+  }
+
+  gPhysicalToLogicalNodeMap.assign(_size, -1);
+  gLogicalToPhysicalNodeMap.assign(_size, -1);
+  for(int node = 0; node < _size; ++node) {
+    int mapped_node = node_map[node];
+    if((mapped_node < 0) || (mapped_node >= _size)) {
+      Error("Error reading node mapping file (entry out of range).");
+    }
+    if(gLogicalToPhysicalNodeMap[mapped_node] != -1) {
+      Error("Error reading node mapping file (duplicate logical node).");
+    }
+    gPhysicalToLogicalNodeMap[node] = mapped_node;
+    gLogicalToPhysicalNodeMap[mapped_node] = node;
+  }
+
   for ( int node = 0; node < _size; ++node ) {
 
     router_name << "router";
@@ -94,8 +125,10 @@ void KNCube::_BuildNet( const Configuration &config )
       }
     }
 
+    int mapped_node = node_map[node];
     _routers[node] = Router::NewRouter( config, this, router_name.str( ), 
 					node, 2*_n + 1, 2*_n + 1 );
+    _routers[node]->SetRoutingID(mapped_node);
     _timed_modules.push_back(_routers[node]);
 
     router_name.str("");

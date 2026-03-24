@@ -298,6 +298,13 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
         _router[i] = _net[i]->GetRouters();
     }
 
+    _queue_sample_period_cycles = config.GetInt("queue_sample_period_cycles");
+    if (_queue_sample_period_cycles > 0) {
+        _max_queue_length.resize(_nodes, vector<vector<int> >(_router[0][0]->NumInputs(), vector<int>(_vcs, 0)));
+        _min_queue_length.resize(_nodes, vector<vector<int> >(_router[0][0]->NumInputs(), vector<int>(_vcs, 999999)));
+    }
+
+
     //seed the network
     int seed;
     if(config.GetStr("seed") == "time") {
@@ -1006,6 +1013,21 @@ void TrafficManager::_Step( )
   
     if ( !_empty_network ) {
         _Inject();
+    }
+
+    if (_queue_sample_period_cycles > 0 && (_time % _queue_sample_period_cycles == 0) && _sim_state == running) {
+        for(int subnet = 0; subnet < _subnets; ++subnet) {
+            for (int n = 0; n < _nodes; ++n) {
+                Router* r = _router[subnet][n];
+                for(int i = 0; i < r->NumInputs(); ++i) {
+                    for(int vc = 0; vc < _vcs; ++vc) {
+                        int occ = r->GetBufferOccupancy(i, vc);
+                        if (occ > _max_queue_length[n][i][vc]) _max_queue_length[n][i][vc] = occ;
+                        if (occ < _min_queue_length[n][i][vc]) _min_queue_length[n][i][vc] = occ;
+                    }
+                }
+            }
+        }
     }
 
     for(int subnet = 0; subnet < _subnets; ++subnet) {
@@ -1984,13 +2006,19 @@ void TrafficManager::DisplayStats(ostream & os) const {
             << "Packet latency average = " << _plat_stats[c]->Average() << endl
             << "\tminimum = " << _plat_stats[c]->Min() << endl
             << "\tmaximum = " << _plat_stats[c]->Max() << endl
+            << "\t95th percentile = " << _plat_stats[c]->Percentile(0.95) << endl
+            << "\t99th percentile = " << _plat_stats[c]->Percentile(0.99) << endl
             << "Network latency average = " << _nlat_stats[c]->Average() << endl
             << "\tminimum = " << _nlat_stats[c]->Min() << endl
             << "\tmaximum = " << _nlat_stats[c]->Max() << endl
+            << "\t95th percentile = " << _nlat_stats[c]->Percentile(0.95) << endl
+            << "\t99th percentile = " << _nlat_stats[c]->Percentile(0.99) << endl
             << "Slowest packet = " << _slowest_packet[c] << endl
             << "Flit latency average = " << _flat_stats[c]->Average() << endl
             << "\tminimum = " << _flat_stats[c]->Min() << endl
             << "\tmaximum = " << _flat_stats[c]->Max() << endl
+            << "\t95th percentile = " << _flat_stats[c]->Percentile(0.95) << endl
+            << "\t99th percentile = " << _flat_stats[c]->Percentile(0.99) << endl
             << "Slowest flit = " << _slowest_flit[c] << endl
             << "Fragmentation average = " << _frag_stats[c]->Average() << endl
             << "\tminimum = " << _frag_stats[c]->Min() << endl
@@ -2077,6 +2105,21 @@ void TrafficManager::DisplayStats(ostream & os) const {
         os << "Crossbar conflict stall rate = " << rate_avg << endl;
 #endif
     
+    }
+
+    if (_queue_sample_period_cycles > 0) {
+        os << "====== Queue Sample Statistics (max/min per node, port, vc) ======" << endl;
+        for (int n = 0; n < _nodes; ++n) {
+            for (int i = 0; i < _router[0][n]->NumInputs(); ++i) {
+                for (int vc = 0; vc < _vcs; ++vc) {
+                    if (_max_queue_length[n][i][vc] > 0 || _min_queue_length[n][i][vc] < 999999) {
+                        os << "  Node " << n << " Port " << i << " VC " << vc 
+                           << " -> max: " << _max_queue_length[n][i][vc] 
+                           << ", min: " << (_min_queue_length[n][i][vc] == 999999 ? 0 : _min_queue_length[n][i][vc]) << endl;
+                    }
+                }
+            }
+        }
     }
 }
 

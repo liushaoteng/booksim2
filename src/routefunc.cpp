@@ -401,6 +401,60 @@ void fattree_anca( const Router *r, const Flit *f,
 
 int dor_next_mesh( int cur, int dest, bool descending = false );
 
+static int mapped_logical_node(int physical_node)
+{
+  if((physical_node >= 0) && (physical_node < (int)gPhysicalToLogicalNodeMap.size())) {
+    return gPhysicalToLogicalNodeMap[physical_node];
+  }
+  return physical_node;
+}
+
+static int mapped_physical_node(int logical_node)
+{
+  if((logical_node >= 0) && (logical_node < (int)gLogicalToPhysicalNodeMap.size()) &&
+     (gLogicalToPhysicalNodeMap[logical_node] >= 0)) {
+    return gLogicalToPhysicalNodeMap[logical_node];
+  }
+  return logical_node;
+}
+
+static int first_differing_bit(int src, int dest)
+{
+  int diff = src ^ dest;
+  if(diff == 0) {
+    return -1;
+  }
+
+  int bit = 0;
+  while(((diff >> bit) & 1) == 0) {
+    ++bit;
+  }
+  return bit;
+}
+
+static int next_port_toward_physical_node(int cur, int target)
+{
+  if(cur == target) {
+    return 2 * gN;
+  }
+
+  int cur_x = cur % gK;
+  int cur_y = cur / gK;
+  int target_x = target % gK;
+  int target_y = target / gK;
+
+  if(cur_x < target_x) {
+    return 0;
+  }
+  if(cur_x > target_x) {
+    return 1;
+  }
+  if(cur_y < target_y) {
+    return 2;
+  }
+  return 3;
+}
+
 void adaptive_xy_yx_mesh( const Router *r, const Flit *f, 
 		 int in_channel, OutputSet *outputs, bool inject )
 {
@@ -695,52 +749,43 @@ void hypercube_on_mesh( const Router *r, const Flit *f, int in_channel, OutputSe
     out_port = -1;
   } else {
     int cur = r->GetID();
+    int cur_logical = r->GetRoutingID();
     int dest = f->dest;
+    int dest_logical = mapped_logical_node(dest);
 
     if (cur == dest) {
+      f->ph = dest_logical;
+      f->intm = dest;
       out_port = 2 * gN; // Eject
     } else {
-      out_port = -1;
-      int cur_x = cur % gK;
-      int cur_y = cur / gK;
+      // f->ph tracks the current virtual hypercube node.
+      // f->intm tracks the physical mesh router that hosts the next virtual hypercube node.
+      if((f->ph < 0) || (f->intm < 0) || (cur == f->intm)) {
+        f->ph = cur_logical;
 
-      // 2. The routing algorithm: Check bits from lowest (0) to highest (3)
-      for (int bit = 0; bit < 4; ++bit) {
-        int dest_bit = (dest >> bit) & 1;
-        int cur_bit  = (cur >> bit) & 1;
-
-        if (cur_bit != dest_bit) {
-          // Look for an immediate physical mesh neighbor whose bit matches the destination bit
-          
-          // Check Right (Port 0)
-          if (cur_x < gK - 1) {
-            int right_neighbor = cur + 1;
-            if (((right_neighbor >> bit) & 1) == dest_bit) { out_port = 0; break; }
-          }
-          // Check Left (Port 1)
-          if (cur_x > 0) {
-            int left_neighbor = cur - 1;
-            if (((left_neighbor >> bit) & 1) == dest_bit)  { out_port = 1; break; }
-          }
-          // Check Down (Port 2) - Note: In Booksim, Y dimension advances by +gK
-          if (cur_y < gK - 1) {
-            int down_neighbor = cur + gK;
-            if (((down_neighbor >> bit) & 1) == dest_bit)  { out_port = 2; break; }
-          }
-          // Check Up (Port 3) - Note: In Booksim, Y dimension steps back by -gK
-          if (cur_y > 0) {
-            int up_neighbor = cur - gK;
-            if (((up_neighbor >> bit) & 1) == dest_bit)    { out_port = 3; break; }
-          }
+        int bit = first_differing_bit(f->ph, dest_logical);
+        if(bit < 0) {
+          f->intm = dest;
+        } else {
+          int next_virtual = f->ph ^ (1 << bit);
+          f->intm = mapped_physical_node(next_virtual);
         }
       }
 
-      // 3. Fallback mechanism
-      // If we couldn't resolve the differing bit using immediate neighbors
-      // (which can happen depending on how exactly node IDs are mapped - 
-      // e.g. standard row-major vs gray-code), we fall back to DOR to keep it moving.
-      if (out_port == -1) {
-        out_port = dor_next_mesh(cur, dest);
+      out_port = next_port_toward_physical_node(cur, f->intm);
+      if((out_port == 2 * gN) && (cur != dest)) {
+        out_port = next_port_toward_physical_node(cur, dest);
+      }
+
+      if(f->watch) {
+        *gWatchOut << GetSimTime() << " | " << r->FullName() << " | "
+                   << "Physical router " << cur
+                   << " logical " << cur_logical
+                   << " routing toward physical " << dest
+                   << " logical " << dest_logical
+                   << " via next virtual target physical " << f->intm
+                   << "."
+                   << endl;
       }
     }
   }
@@ -1406,6 +1451,65 @@ void valiant_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *ou
 
 //=============================================================
 
+void dsl_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
+{
+  int vcBegin = 0, vcEnd = gNumVCs-1;
+  if ( f->type == Flit::READ_REQUEST ) {
+    vcBegin = gReadReqBeginVC;
+    vcEnd = gReadReqEndVC;
+  } else if ( f->type == Flit::WRITE_REQUEST ) {
+    vcBegin = gWriteReqBeginVC;
+    vcEnd = gWriteReqEndVC;
+  } else if ( f->type ==  Flit::READ_REPLY ) {
+    vcBegin = gReadReplyBeginVC;
+    vcEnd = gReadReplyEndVC;
+  } else if ( f->type ==  Flit::WRITE_REPLY ) {
+    vcBegin = gWriteReplyBeginVC;
+    vcEnd = gWriteReplyEndVC;
+  }
+  assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
+
+  int out_port;
+
+  if(inject) {
+    out_port = -1;
+  } else {
+    if ( in_channel == 2*gN ) {
+      f->ph   = 0;  // Phase 0
+      static map<int, int> dsl_rr_counter;
+      int src = r->GetID();
+      if (dsl_rr_counter.find(src) == dsl_rr_counter.end()) {
+        dsl_rr_counter[src] = src;
+      }
+      f->intm = dsl_rr_counter[src] % gNodes;
+      dsl_rr_counter[src]++;
+    }
+
+    if ( ( f->ph == 0 ) && ( r->GetID( ) == f->intm ) ) {
+      f->ph = 1; // Go to phase 1
+    }
+
+    out_port = dor_next_mesh( r->GetID( ), (f->ph == 0) ? f->intm : f->dest );
+
+    if(r->GetID() != f->dest) {
+      int const available_vcs = (vcEnd - vcBegin + 1) / 2;
+      assert(available_vcs > 0);
+
+      if(f->ph == 0) {
+        vcEnd -= available_vcs;
+      } else {
+        assert(f->ph == 1);
+        vcBegin += available_vcs;
+      }
+    }
+  }
+
+  outputs->Clear( );
+  outputs->AddRange( out_port, vcBegin, vcEnd );
+}
+
+//=============================================================
+
 void valiant_torus( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
 {
   int vcBegin = 0, vcEnd = gNumVCs-1;
@@ -1986,61 +2090,94 @@ void chaos_mesh( const Router *r, const Flit *f,
 
 //=============================================================
 
-void hypercube_on_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
+void racke_tree_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *outputs, bool inject )
 {
   int vcBegin = 0, vcEnd = gNumVCs-1;
-  if ( f->type == Flit::READ_REQUEST )      { vcBegin = gReadReqBeginVC;    vcEnd = gReadReqEndVC;    }
-  else if ( f->type == Flit::WRITE_REQUEST ){ vcBegin = gWriteReqBeginVC;   vcEnd = gWriteReqEndVC;   }
-  else if ( f->type == Flit::READ_REPLY )   { vcBegin = gReadReplyBeginVC;  vcEnd = gReadReplyEndVC;  }
-  else if ( f->type == Flit::WRITE_REPLY )  { vcBegin = gWriteReplyBeginVC; vcEnd = gWriteReplyEndVC; }
+  if ( f->type == Flit::READ_REQUEST ) {
+    vcBegin = gReadReqBeginVC;
+    vcEnd = gReadReqEndVC;
+  } else if ( f->type == Flit::WRITE_REQUEST ) {
+    vcBegin = gWriteReqBeginVC;
+    vcEnd = gWriteReqEndVC;
+  } else if ( f->type ==  Flit::READ_REPLY ) {
+    vcBegin = gReadReplyBeginVC;
+    vcEnd = gReadReplyEndVC;
+  } else if ( f->type ==  Flit::WRITE_REPLY ) {
+    vcBegin = gWriteReplyBeginVC;
+    vcEnd = gWriteReplyEndVC;
+  }
   assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
 
   int out_port;
 
-  if (inject) {
+  if(inject) {
     out_port = -1;
   } else {
     int cur = r->GetID();
     int dest = f->dest;
 
-    if (cur == dest) {
-      out_port = 2 * gN; // Eject
-    } else {
-      out_port = -1;
-      int cur_x = cur % gK;
-      int cur_y = cur / gK;
-
-      for (int bit = 0; bit < 4; ++bit) {
-        int dest_bit = (dest >> bit) & 1;
-        int cur_bit  = (cur >> bit) & 1;
-
-        if (cur_bit != dest_bit) {
-          if (cur_x < gK - 1) {
-            int right_neighbor = cur + 1;
-            if (((right_neighbor >> bit) & 1) == dest_bit) { out_port = 0; break; }
-          }
-          if (cur_x > 0) {
-            int left_neighbor = cur - 1;
-            if (((left_neighbor >> bit) & 1) == dest_bit)  { out_port = 1; break; }
-          }
-          if (cur_y < gK - 1) {
-            int down_neighbor = cur + gK;
-            if (((down_neighbor >> bit) & 1) == dest_bit)  { out_port = 2; break; }
-          }
-          if (cur_y > 0) {
-            int up_neighbor = cur - gK;
-            if (((up_neighbor >> bit) & 1) == dest_bit)    { out_port = 3; break; }
-          }
+    if ( in_channel == 2*gN ) {
+      // Injected: Decide Rule 2 or Rule 3
+      if ( (f->pid % 2) == 0 ) {
+        // Rule 2: Row-Scatter (H -> V -> H)
+        int src_y = cur / gK;
+        int dest_y = dest / gK;
+        if (src_y != dest_y) {
+          f->ph = 0; // Phase 0: X scatter in current row
+          f->intm = src_y * gK + ((f->pid / 2) % gK);
+        } else {
+          f->ph = 2; // Direct X
+          f->intm = dest;
+        }
+      } else {
+        // Rule 3: Col-Scatter (V -> H -> V)
+        int src_x = cur % gK;
+        int dest_x = dest % gK;
+        if (src_x != dest_x) {
+          f->ph = 10; // Phase 10: Y scatter in current column
+          f->intm = ((f->pid / 2) % gK) * gK + src_x;
+        } else {
+          f->ph = 12; // Direct Y
+          f->intm = dest;
         }
       }
+    }
 
-      if (out_port == -1) {
-        out_port = dor_next_mesh(cur, dest);
-      }
+
+    // Phase transitions
+    if ( f->ph == 0 && cur == f->intm ) {
+        f->ph = 1; // Now move to target row (Y)
+        f->intm = (dest / gK) * gK + (f->intm % gK); // stay in current column
+    } else if ( f->ph == 1 && cur == f->intm ) {
+        f->ph = 2; // Now move to final dest (X)
+        f->intm = dest;
+    } else if ( f->ph == 10 && cur == f->intm ) {
+        f->ph = 11; // Now move to target column (X)
+        f->intm = (f->intm / gK) * gK + (dest % gK); // stay in current row
+    } else if ( f->ph == 11 && cur == f->intm ) {
+        f->ph = 12; // Now move to final dest (Y)
+        f->intm = dest;
+    }
+
+    // Determine out_port using DOR
+    out_port = dor_next_mesh( cur, f->intm );
+
+    if(r->GetID() != f->dest) {
+      int const available_vcs = vcEnd - vcBegin + 1;
+      int vcs_per_phase = available_vcs / 3;
+      if (vcs_per_phase <= 0) vcs_per_phase = 1;
+
+      int sub_ph = 0;
+      if (f->ph == 0 || f->ph == 10) sub_ph = 0;
+      else if (f->ph == 1 || f->ph == 11) sub_ph = 1;
+      else sub_ph = 2;
+
+      vcBegin += sub_ph * vcs_per_phase;
+      if (sub_ph < 2) vcEnd = vcBegin + vcs_per_phase - 1;
     }
   }
 
-  outputs->Clear();
+  outputs->Clear( );
   outputs->AddRange( out_port, vcBegin, vcEnd );
 }
 
@@ -2121,13 +2258,16 @@ void InitializeRoutingMap( const Configuration & config )
   //  gRoutingFunctionMap["limited_adapt_mesh"] = &limited_adapt_mesh;
 
   gRoutingFunctionMap["valiant_mesh"]  = &valiant_mesh;
+  gRoutingFunctionMap["dsl_mesh"]  = &dsl_mesh;
   gRoutingFunctionMap["valiant_torus"] = &valiant_torus;
   gRoutingFunctionMap["valiant_ni_torus"] = &valiant_ni_torus;
 
   gRoutingFunctionMap["dest_tag_fly"] = &dest_tag_fly;
 
-  gRoutingFunctionMap["hypercube_on_mesh"] = &hypercube_on_mesh;
+  gRoutingFunctionMap["hypercube_mesh"] = &hypercube_on_mesh;
 
   gRoutingFunctionMap["chaos_mesh"]  = &chaos_mesh;
   gRoutingFunctionMap["chaos_torus"] = &chaos_torus;
+
+  gRoutingFunctionMap["racke_tree_mesh"] = &racke_tree_mesh;
 }

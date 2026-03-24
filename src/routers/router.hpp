@@ -51,6 +51,7 @@ protected:
   static int const STALL_CROSSBAR_CONFLICT;
 
   int _id;
+  int _routing_id;
   
   int _inputs;
   int _outputs;
@@ -119,10 +120,13 @@ public:
   bool IsFaultyOutput( int c ) const;
 
   inline int GetID( ) const {return _id;}
+  inline int GetRoutingID( ) const {return _routing_id;}
+  inline void SetRoutingID( int routing_id ) { _routing_id = routing_id; }
 
 
   virtual int GetUsedCredit(int o) const = 0;
   virtual int GetBufferOccupancy(int i) const = 0;
+  virtual int GetBufferOccupancy(int input, int vc) const { return 0; }
 
 #ifdef TRACK_BUFFERS
   virtual int GetUsedCreditForClass(int output, int cl) const = 0;

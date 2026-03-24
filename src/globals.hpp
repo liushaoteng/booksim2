@@ -45,6 +45,8 @@ extern int gN;
 extern int gC;
 
 extern int gNodes;
+extern std::vector<int> gPhysicalToLogicalNodeMap;
+extern std::vector<int> gLogicalToPhysicalNodeMap;
 
 extern bool gTrace;
 

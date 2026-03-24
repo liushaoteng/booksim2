@@ -1,0 +1,64 @@
+BEGIN Configuration File: ../data/test_dynamic.config
+topology = mesh;
+k = 3;
+n = 2;
+routing_function = dor;
+traffic = dynamic_perm;
+perm_seed = 123;
+injection_rate = 0.1;
+sim_type = latency;
+max_samples = 1;
+sample_period = 1000;
+num_vcs = 1;
+vc_buf_size = 4;
+
+END Configuration File: ../data/test_dynamic.config
+Creating DynamicPermutationTrafficPattern with nodes=9 seed=123
+Generating permutation 0...
+Generating permutation 100...
+Generating permutation 200...
+Generating permutation 300...
+Generating permutation 400...
+Generating permutation 500...
+Class 0:
+Packet latency average = 16.475
+	minimum = 7
+	maximum = 33
+	95th percentile = 26.5
+	99th percentile = 29.5
+Network latency average = 16.475
+	minimum = 7
+	maximum = 33
+	95th percentile = 26.5
+	99th percentile = 29.5
+Slowest packet = 269
+Flit latency average = 16.475
+	minimum = 7
+	maximum = 33
+	95th percentile = 26.5
+	99th percentile = 29.5
+Slowest flit = 269
+Fragmentation average = 0
+	minimum = 0
+	maximum = 0
+Injected packet rate average = 0.0927778
+	minimum = 0.074 (at node 2)
+	maximum = 0.112 (at node 1)
+Accepted packet rate average = 0.091
+	minimum = 0.087 (at node 4)
+	maximum = 0.096 (at node 5)
+Injected flit rate average = 0.0927778
+	minimum = 0.074 (at node 2)
+	maximum = 0.112 (at node 1)
+Accepted flit rate average= 0.091
+	minimum = 0.087 (at node 4)
+	maximum = 0.096 (at node 5)
+Injected packet length average = 1
+Accepted packet length average = 1
+Total in-flight flits = 16 (0 measured)
+====== Queue Sample Statistics (max/min per node, port, vc) ======
+latency change    = 1
+throughput change = 1
+Too many sample periods needed to converge
+Simulation unstable, ending ...
+Total run time 0.00829601

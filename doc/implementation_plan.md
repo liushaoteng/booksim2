@@ -23,9 +23,11 @@
 ## 3. 核心代码改造与算法创新引擎 (Core Code Modification & Innovation)
 在小目标的网格无阻塞测试阶段中，加速比的研究需要对模拟器底层进行深度的外科手术：
 
-### 3.1 拓扑图映射与节点重编号 (Topology Mapping & Node Re-indexing)
-- 为了在物理 Mesh 网络上逼近无阻塞（Non-blocking）的极致加速比，必须将更高维的逻辑图（如 Hypercube，超立方体）映射嵌入到低维的 Mesh 节点中。
-- **源码改造落地点**：必须打破 BookSim 默认的线性 `ID = y * k + x` 编号，深度修改 `src/networks/kncube.cpp` 中的 `_BuildNet` 以及邻居感知逻辑（`_LeftNode` 和 `_RightNode`），引入格雷码或其他自研的完美图映射坐标系算法。这也是**“小目标”代码最核心的改动发力点**。
+### 3.1 基于外部配置文件的灵活拓扑图映射 (File-Based Topology Mapping)
+- 为了在物理 Mesh 网络上逼近无阻塞（Non-blocking）的极致加速比，必须将更高维的逻辑图（如 Hypercube，超立方体）灵活地映射嵌入到低维的 Mesh 节点中。
+- **核心工程设计原则（代码解耦与可扩展性）**：为了避免每次修改模型都要重新修改并编译 C++ 源码，采取**外部导入模式**替代 `kncube.cpp` 里的“硬编码污染 (Hardcoding)”：
+  - **动态映射加载机制**：给 BookSim 的网络构建层（`kncube.cpp` 或通过 `Configuration` 传参）编写一套“映射解析器”。从外部自定义的 `.txt` / `.map` 甚至纯粹从参数配置里直接读取数组，并在初始化期间重新生成一套内部的 `Physical -> Logical ID` 和 `Logical -> Physical ID` 的映射查阅表（Lookup Table）。
+  - **优势**：这一修改极其有利于后续实验的横跨验证！你可以通过 Python 脚本自由地随机生成或者穷举千万种打乱编号的拓扑矩阵映射图，直接通过命令行参数批量“喂”给同一个无需重新编译的 BookSim 核心引擎。这也是全工程**“小目标阶段最优雅的发力点”**。
 
 ### 3.2 自定义路由与灵感迭代 (Routing Algorithm Iteration)
 除了对比经典算法（如 DOR 基础算法、ROMM/Valiant 高级算法），**创新的路由算法是小目标的核心竞争力**。
@@ -51,6 +53,18 @@
   - 核心要求：设立主从机制（Pool/Queue），工作节点 (Worker Processes) 异步消费测试配置队列。确保每个 CPU 核心全负荷运转，消除性能木桶上的短板。
   - **解耦输出与聚合**：每个子仿真进程独立输出带有配置哈希签名的单独 `.csv` 或 `.json`，仿真结束后由主进程统一通过 Pandas / Matplotlib 等合并绘制最终的 Latency-Throughput 对比性能曲线。
 
-## 5. 分析指标 (Result Analytics)
+## 5. 分析指标与微观测量体系 (Result Analytics & Micro-Metrics)
+除了基础的宏观性能以外，需要对仿真分析进行深度增强：
 - **Speedup Ratio (加速比提取)**：纵向对比相同框架下各种路由设计的峰值吞吐量。
 - **Zero-load Latency (零负载延迟)**：判断控制流的理论最优时延。
+- **包时延全景分布 (Latency Distributions)**：不仅关注均值 (Avg)，还必须解析输出最大值 (Max)、最小值 (Min) 以及 percentile 分位数（如 95th，99th 长尾延迟）。
+- **配置与仿真语境自动记录**：所有生成的综合测试结果（JSON/CSV）必须自动带上当前测试括扑大小、注入率、包大小 (flits) 等关键配置元数据。
+
+### 5.1 基于采样定律的队列拥塞监控 (Queue Length Sampling)
+为了精准找出网络瓶颈而不被全量遍历拖垮系统性能，我们采取物理学上的**周期性采样 (Periodic Sampling)**：
+- 在 BookSim 源码中引入采样间隔宏控制，比如 `queue_sample_period_cycles`（例如只在每隔 500 个仿真钟周期进行一次切片采样）。
+- 在达到稳态 (Steady-state) 后，系统将周期性抓取所有基站节点内部所有队列（如 VC 队列）的待消费长度，最后统合输出队列长度的极大值 (Max) 与极小值 (Min)。
+
+## 6. 工程测试目录体系架构 (Test Directory Reorganization)
+- 严禁测试脚本与核心 C++ 源码混杂。要求所有的 Python 驱动框架（例如生成拓扑 `map_*.txt`，并发批量遍历路由，清洗生成图表等）全部挪入并归档在统一的独立 `tests/` 文件夹中。
+- `src/` 目录严格保留纯净的跨平台编译底座，彻底分离数据控制流与模拟计算流。

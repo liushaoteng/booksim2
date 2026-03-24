@@ -1,0 +1,95 @@
+[
+    {
+        "permutation_seed": 123,
+        "permutation": [
+            2,
+            1,
+            4,
+            8,
+            6,
+            5,
+            0,
+            7,
+            3
+        ],
+        "status": "SATURATED",
+        "metrics": {
+            "config": {
+                "packet_size": 1,
+                "injection_rate": 0.8571,
+                "vc_buf_size": 32,
+                "num_vcs": 24
+            },
+            "accepted_rate": 0.789167,
+            "packet_latency_avg": 3902.63,
+            "packet_latency_max": 32765.0,
+            "packet_latency_min": 6.0,
+            "packet_latency_95th": 999.5,
+            "packet_latency_99th": 999.5,
+            "queue_overall_max": 1,
+            "queue_overall_min": 0
+        }
+    },
+    {
+        "permutation_seed": 456,
+        "permutation": [
+            1,
+            5,
+            7,
+            4,
+            0,
+            2,
+            8,
+            3,
+            6
+        ],
+        "status": "SATURATED",
+        "metrics": {
+            "config": {
+                "packet_size": 1,
+                "injection_rate": 0.8571,
+                "vc_buf_size": 32,
+                "num_vcs": 24
+            },
+            "accepted_rate": 0.646222,
+            "packet_latency_avg": 9104.89,
+            "packet_latency_max": 34722.0,
+            "packet_latency_min": 3469.0,
+            "packet_latency_95th": 999.5,
+            "packet_latency_99th": 999.5,
+            "queue_overall_max": 1,
+            "queue_overall_min": 0
+        }
+    },
+    {
+        "permutation_seed": 789,
+        "permutation": [
+            6,
+            3,
+            7,
+            8,
+            1,
+            5,
+            4,
+            0,
+            2
+        ],
+        "status": "SATURATED",
+        "metrics": {
+            "config": {
+                "packet_size": 1,
+                "injection_rate": 0.8571,
+                "vc_buf_size": 32,
+                "num_vcs": 24
+            },
+            "accepted_rate": 0.663611,
+            "packet_latency_avg": 9994.91,
+            "packet_latency_max": 25298.0,
+            "packet_latency_min": 6.0,
+            "packet_latency_95th": 999.5,
+            "packet_latency_99th": 999.5,
+            "queue_overall_max": 1,
+            "queue_overall_min": 0
+        }
+    }
+]

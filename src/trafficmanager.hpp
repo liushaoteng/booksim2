@@ -216,6 +216,11 @@ protected:
   int   _max_samples;
   int   _warmup_periods;
 
+  int   _queue_sample_period_cycles;
+  vector<vector<vector<int> > > _max_queue_length;
+  vector<vector<vector<int> > > _min_queue_length;
+
+
   int   _include_queuing;
 
   vector<int> _measure_stats;

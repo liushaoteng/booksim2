@@ -111,6 +111,23 @@ public:
   virtual int dest(int source);
 };
 
+class DynamicPermutationTrafficPattern : public TrafficPattern {
+private:
+  vector<int> _packet_counts;
+  vector<vector<int> > _perms;
+public:
+  DynamicPermutationTrafficPattern(int nodes, int seed);
+  virtual int dest(int source);
+};
+
+class CustomPermTrafficPattern : public TrafficPattern {
+private:
+  vector<int> _dest;
+public:
+  CustomPermTrafficPattern(int nodes, const vector<int>& perm);
+  virtual int dest(int source);
+};
+
 class RandomTrafficPattern : public TrafficPattern {
 protected:
   RandomTrafficPattern(int nodes);

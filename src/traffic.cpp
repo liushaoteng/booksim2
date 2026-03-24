@@ -73,6 +73,11 @@ TrafficPattern * TrafficPattern::New(string const & pattern, int nodes,
     result = new BitRevTrafficPattern(nodes);
   } else if(pattern_name == "shuffle") {
     result = new ShuffleTrafficPattern(nodes);
+  } else if(pattern_name == "custom_perm") {
+    vector<string> perm_strs = tokenize_str(config->GetStr("custom_perm_array"));
+    vector<int> perm;
+    for(size_t i=0; i<perm_strs.size(); ++i) perm.push_back(atoi(perm_strs[i].c_str()));
+    result = new CustomPermTrafficPattern(nodes, perm);
   } else if(pattern_name == "randperm") {
     int perm_seed = -1;
     if(params.empty()) {
@@ -91,6 +96,22 @@ TrafficPattern * TrafficPattern::New(string const & pattern, int nodes,
       perm_seed = atoi(params[0].c_str());
     }
     result = new RandomPermutationTrafficPattern(nodes, perm_seed);
+  } else if(pattern_name == "dynamic_perm") {
+    int perm_seed = -1;
+    if(params.empty()) {
+      if(config) {
+	if(config->GetStr("perm_seed") == "time") {
+	  perm_seed = int(time(NULL));
+	} else {
+	  perm_seed = config->GetInt("perm_seed");
+	}
+      } else {
+	perm_seed = 123; // fallback
+      }
+    } else {
+      perm_seed = atoi(params[0].c_str());
+    }
+    result = new DynamicPermutationTrafficPattern(nodes, perm_seed);
   } else if(pattern_name == "uniform") {
     result = new UniformRandomTrafficPattern(nodes);
   } else if(pattern_name == "background") {
@@ -355,11 +376,15 @@ void RandomPermutationTrafficPattern::randomize(int seed)
 	++cnt;
       }
       ++j;
-      assert(j < _nodes);
     }
-
     _dest[j] = i;
   }
+
+  cout << "PERM_MAP: ";
+  for(int d = 0; d < _nodes; ++d) {
+    cout << _dest[d] << (d == _nodes - 1 ? "" : ",");
+  }
+  cout << endl;
 
   RestoreRandomState(save_x, save_u); 
 }
@@ -368,6 +393,48 @@ int RandomPermutationTrafficPattern::dest(int source)
 {
   assert((source >= 0) && (source < _nodes));
   assert((_dest[source] >= 0) && (_dest[source] < _nodes));
+  return _dest[source];
+}
+
+DynamicPermutationTrafficPattern::DynamicPermutationTrafficPattern(int nodes, int seed)
+  : TrafficPattern(nodes), _packet_counts(nodes, 0)
+{
+  _perms.resize(512);
+  vector<int> current_perm(nodes);
+  for(int i=0; i<nodes; ++i) current_perm[i] = i;
+
+  vector<long> save_x;
+  vector<double> save_u;
+  SaveRandomState(save_x, save_u);
+  RandomSeed(seed);
+
+  for(int p=0; p<512; ++p) {
+    _perms[p] = current_perm;
+    for(int i=0; i<nodes; ++i) {
+      int target = i + RandomInt(nodes - 1 - i);
+      int temp = _perms[p][i];
+      _perms[p][i] = _perms[p][target];
+      _perms[p][target] = temp;
+    }
+  }
+
+  RestoreRandomState(save_x, save_u);
+}
+
+int DynamicPermutationTrafficPattern::dest(int source)
+{
+  assert((source >= 0) && (source < _nodes));
+  int k = _packet_counts[source]++;
+  return _perms[k % 512][source];
+}
+
+CustomPermTrafficPattern::CustomPermTrafficPattern(int nodes, const vector<int>& perm)
+  : TrafficPattern(nodes), _dest(perm)
+{
+}
+
+int CustomPermTrafficPattern::dest(int source)
+{
   return _dest[source];
 }
 

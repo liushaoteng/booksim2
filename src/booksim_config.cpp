@@ -156,6 +156,7 @@ BookSimConfig::BookSimConfig( )
   _int_map["classes"] = 1;
 
   AddStrField( "traffic", "uniform" );
+  AddStrField("custom_perm_array", "");
 
   _int_map["class_priority"] = 0;
   AddStrField("class_priority", ""); // workaraound to allow for vector specification
@@ -232,6 +233,8 @@ BookSimConfig::BookSimConfig( )
 
   _int_map["sample_period"] = 1000; // how long between measurements
   _int_map["max_samples"]   = 10;   // maximum number of sample periods in a simulation
+  _int_map["queue_sample_period_cycles"] = 100; // how often to sample internal VC queues
+
 
   // whether or not to measure statistics for a given traffic class
   _int_map["measure_stats"] = 1;
@@ -314,6 +317,9 @@ BookSimConfig::BookSimConfig( )
 
   //==================Network file===========================
   AddStrField("network_file","");
+
+  //==================Node Mapping file======================
+  AddStrField("node_mapping_file", "");
 }
 
 

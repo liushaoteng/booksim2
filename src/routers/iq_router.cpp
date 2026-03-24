@@ -2297,6 +2297,12 @@ int IQRouter::GetBufferOccupancy(int i) const {
   return _buf[i]->GetOccupancy();
 }
 
+int IQRouter::GetBufferOccupancy(int input, int vc) const {
+  assert(input >= 0 && input < _inputs);
+  assert(vc >= 0 && vc < _vcs);
+  return _buf[input]->GetOccupancy(vc);
+}
+
 #ifdef TRACK_BUFFERS
 int IQRouter::GetUsedCreditForClass(int output, int cl) const
 {

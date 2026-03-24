@@ -57,6 +57,7 @@ public:
   double Sum( ) const;
   double SquaredSum( ) const;
   int    NumSamples( ) const;
+  double Percentile( double p ) const;
 
   void AddSample( double val );
   inline void AddSample( int val ) {

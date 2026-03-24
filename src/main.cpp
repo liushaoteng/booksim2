@@ -84,6 +84,8 @@ int gN;//dimension
 int gC;//concentration
 
 int gNodes;
+vector<int> gPhysicalToLogicalNodeMap;
+vector<int> gLogicalToPhysicalNodeMap;
 
 //generate nocviewer trace
 bool gTrace;
