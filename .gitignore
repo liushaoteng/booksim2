@@ -3,3 +3,27 @@
 ._*
 .Apple*
 .DS_Store
+
+# Generated test artifacts
+tests/scripts/__pycache__/
+tests/scripts/*.log
+
+# Organized result archives and legacy flat outputs
+tests/data/results/
+tests/data/*.log
+tests/data/*.json
+tests/data/*.config
+tests/data/*.dot
+tests/data/*.png
+tests/data/*.svg
+tests/data/runs/
+tests/data/visualizations/
+tests/data/racke_hard_case_logs/
+
+# Generated scratch configs and mapping files
+/map*.txt
+/temp_config
+/temp_config.*
+/src/temp_config
+/src/temp_config.*
+tests/data/inputs/maps/*.txt
