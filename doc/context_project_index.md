@@ -49,6 +49,10 @@
   作用：保存饱和点附近 downward scan 的实验规则、判定口径和当前项目经验。
   适用：吞吐上限、无阻塞加速比、worst-case permutation、Racke 容量验证。
 
+- `doc/methodology_racke_dsl_repro.md`
+  作用：保存同事复现 `RackeTree` / `DSL` 仿真的构建、配置、脚本入口与 smoke-run 命令。
+  适用：需要从仓库根目录直接 build/run 当前 `3x3` Mesh 验证流程的任务。
+
 - `~/.codex/skills/booksim-saturation-scan/SKILL.md`
   作用：把上述方法学规则作为工作流装载到具体会话中。
 
