@@ -1,86 +1,112 @@
-import itertools
 import collections
+import itertools
 
-# 3x3 Mesh nodes: 0..8
-# (x, y) = (node % 3, node // 3)
+K = 3
+NODES = list(range(K * K))
+EXPECTED_MAX_LOAD = 7.0 / 6.0
+TOL = 1e-9
 
-def get_dist(u, v):
-    ux, uy = u % 3, u // 3
-    vx, vy = v % 3, v // 3
-    return abs(ux-vx) + abs(uy-vy)
 
 def get_path_xy(u, v):
-    ux, uy = u % 3, u // 3
-    vx, vy = v % 3, v // 3
+    ux, uy = u % K, u // K
+    vx, vy = v % K, v // K
     path = []
-    # X-first: move horizontally
     curr_x, curr_y = ux, uy
     while curr_x != vx:
         step = 1 if vx > curr_x else -1
         next_x = curr_x + step
-        edge = (curr_y * 3 + curr_x, curr_y * 3 + next_x)
-        path.append(edge)
+        path.append((curr_y * K + curr_x, curr_y * K + next_x))
         curr_x = next_x
-    # Move vertically
     while curr_y != vy:
         step = 1 if vy > curr_y else -1
         next_y = curr_y + step
-        edge = (curr_y * 3 + curr_x, next_y * 3 + curr_x)
-        path.append(edge)
+        path.append((curr_y * K + curr_x, next_y * K + curr_x))
         curr_y = next_y
     return path
 
-def run_analysis():
-    nodes = list(range(9))
-    perms = list(itertools.permutations(nodes))
-    total_perms = len(perms)
-    print(f"Total permutations: {total_perms}")
-    
-    # Precompute edge contributions for each node pair (u,v) using Rule 2 & 3
-    # Rule 2: If same row or column, route XY directly.
-    # Rule 3: If different row and column, split 50/50:
-    #   Path A: Intermediate node in same row as U and same column as V.
-    #   Path B: Intermediate node in same column as U and same row as V.
-    
-    pair_contributions = {}
-    for u in nodes:
-        ux, uy = u % 3, u // 3
-        for v in nodes:
-            if u == v: continue
-            vx, vy = v % 3, v // 3
-            edges = collections.defaultdict(float)
-            if ux == vx or uy == vy:
-                # Direct XY
-                for e in get_path_xy(u, v):
-                    edges[e] += 1.0
-            else:
-                # Split 50/50
-                w1 = vy * 3 + ux # Same col as U, same row as V
-                w2 = uy * 3 + vx # Same row as U, same col as V
-                # Path A: U -> w1 -> V (All XY)
-                for e in get_path_xy(u, w1): edges[e] += 0.5
-                for e in get_path_xy(w1, v): edges[e] += 0.5
-                # Path B: U -> w2 -> V (All XY)
-                for e in get_path_xy(u, w2): edges[e] += 0.5
-                for e in get_path_xy(w2, v): edges[e] += 0.5
-            pair_contributions[(u, v)] = dict(edges)
 
-    max_worst_load = 0.0
-    
-    # For speed, we just check the load-balanced case (uniform) first
+def add_path(edges, u, v, weight):
+    for edge in get_path_xy(u, v):
+        edges[edge] += weight
+
+
+def racke_pair_contribution(u, v):
+    ux, uy = u % K, u // K
+    vx, vy = v % K, v // K
+    edges = collections.defaultdict(float)
+
+    if u == v:
+        return {}
+
+    if uy == vy:
+        add_path(edges, u, v, 0.5)
+    else:
+        for mid_x in range(K):
+            row_node = uy * K + mid_x
+            col_node = vy * K + mid_x
+            add_path(edges, u, row_node, 1.0 / 6.0)
+            add_path(edges, row_node, col_node, 1.0 / 6.0)
+            add_path(edges, col_node, v, 1.0 / 6.0)
+
+    if ux == vx:
+        add_path(edges, u, v, 0.5)
+    else:
+        for mid_y in range(K):
+            col_node = mid_y * K + ux
+            row_node = mid_y * K + vx
+            add_path(edges, u, col_node, 1.0 / 6.0)
+            add_path(edges, col_node, row_node, 1.0 / 6.0)
+            add_path(edges, row_node, v, 1.0 / 6.0)
+
+    return dict(edges)
+
+
+def run_analysis():
+    perms = list(itertools.permutations(NODES))
+    print(f"Total permutations: {len(perms)}")
+
+    pair_contributions = {
+        (u, v): racke_pair_contribution(u, v)
+        for u in NODES
+        for v in NODES
+        if u != v
+    }
+
     edge_totals = collections.defaultdict(float)
-    for (u, v), edges in pair_contributions.items():
-        for e, load in edges.items():
-            edge_totals[e] += load / 9.0
-            
+    for edges in pair_contributions.values():
+        for edge, load in edges.items():
+            edge_totals[edge] += load / len(NODES)
+
     print("\nSteady State (Uniform) Edge Loads:")
-    unique_loads = sorted(list(set(edge_totals.values())), reverse=True)
-    for l in unique_loads:
-        print(f"Load {l:.4f} (Theoretical: {l*6:.2f}/6)")
-    
-    max_worst_load = max(edge_totals.values())
-    print(f"\nWorst-case Edge Load: {max_worst_load:.4f}")
-    print(f"Bisection Limit: {1.0/max_worst_load:.4f}")
+    for load in sorted(set(edge_totals.values()), reverse=True):
+        print(f"Load {load:.4f}")
+
+    max_uniform_load = max(edge_totals.values())
+    print(f"\nWorst Uniform Edge Load: {max_uniform_load:.4f}")
+    print(f"Uniform Injection Bound: {1.0/max_uniform_load:.4f}")
+
+    max_perm_load = 0.0
+    for perm in perms:
+        edge_counts = collections.defaultdict(float)
+        for u in NODES:
+            v = perm[u]
+            if u == v:
+                continue
+            for edge, load in pair_contributions[(u, v)].items():
+                edge_counts[edge] += load
+        if edge_counts:
+            max_perm_load = max(max_perm_load, max(edge_counts.values()))
+
+    print(f"\nWorst Permutation Edge Load: {max_perm_load:.4f}")
+    print(f"Expected Permutation Bound: {EXPECTED_MAX_LOAD:.4f}")
+    print(f"Permutation Injection Bound: {1.0/max_perm_load:.4f}")
+    print(f"Expected Injection Bound: {6.0/7.0:.4f}")
+    if abs(max_perm_load - EXPECTED_MAX_LOAD) <= TOL:
+        print("PASS: worst-case permutation edge load matches 7/6.")
+    else:
+        raise SystemExit(
+            f"FAIL: expected {EXPECTED_MAX_LOAD:.10f}, got {max_perm_load:.10f}"
+        )
 
 if __name__ == "__main__":
     run_analysis()
