@@ -33,7 +33,7 @@
 
 Buffer::Buffer( const Configuration& config, int outputs, 
 		Module *parent, const string& name ) :
-Module( parent, name ), _occupancy(0)
+Module( parent, name ), _occupancy(0), _max_occupancy(0)
 {
   int num_vcs = config.GetInt( "num_vcs" );
 
@@ -69,6 +69,9 @@ void Buffer::AddFlit( int vc, Flit *f )
     Error("Flit buffer overflow.");
   }
   ++_occupancy;
+  if(_occupancy > _max_occupancy) {
+    _max_occupancy = _occupancy;
+  }
   _vc[vc]->AddFlit(f);
 #ifdef TRACK_BUFFERS
   ++_class_occupancy[f->cl];

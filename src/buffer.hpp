@@ -40,8 +40,9 @@ class Buffer : public Module {
   
   int _occupancy;
   int _size;
+  int _max_occupancy;
 
-  vector<VC*> _vc;
+  vector<VC*>_vc;
 
 #ifdef TRACK_BUFFERS
   vector<int> _class_occupancy;
@@ -146,6 +147,16 @@ public:
   inline int GetOccupancy( int vc ) const
   {
     return _vc[vc]->GetOccupancy( );
+  }
+
+  inline int GetMaxOccupancy( ) const
+  {
+    return _max_occupancy;
+  }
+
+  inline int GetMaxOccupancy( int vc ) const
+  {
+    return _vc[vc]->GetMaxOccupancy( );
   }
 
 #ifdef TRACK_BUFFERS

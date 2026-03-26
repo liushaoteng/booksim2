@@ -93,6 +93,7 @@ BookSimConfig::BookSimConfig( )
 
   // enable next-hop-output queueing
   _int_map["noq"] = 0;
+  _int_map["noq_no_uturn"] = 0;
 
   //==== Input-queued ======================================
 

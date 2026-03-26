@@ -40,6 +40,54 @@
 #include "vc.hpp"
 #include "packet_reply_info.hpp"
 
+namespace {
+
+int NOQSlotIndex(int input_port, int next_output_port, int num_outputs, bool no_u_turn)
+{
+    assert(next_output_port >= 0);
+    assert(next_output_port < num_outputs);
+
+    if(!no_u_turn) {
+        return next_output_port;
+    }
+
+    int const local_port = num_outputs - 1;
+    if(input_port == local_port) {
+        if(next_output_port == local_port) {
+            return -1;
+        }
+        return next_output_port;
+    }
+
+    assert(input_port >= 0);
+    assert(input_port < num_outputs);
+    assert(next_output_port != input_port);
+    return (next_output_port < input_port) ? next_output_port : (next_output_port - 1);
+}
+
+int NOQSlotCount(int input_port, int next_output_port, int num_outputs, bool no_u_turn)
+{
+    if(!no_u_turn) {
+        return num_outputs;
+    }
+
+    int const local_port = num_outputs - 1;
+    if((input_port == local_port) && (next_output_port == local_port)) {
+        return num_outputs;
+    }
+
+    return num_outputs - 1;
+}
+
+void RequireNOQSingleNextOutput(Module const *module, size_t route_count)
+{
+    if(route_count != 1) {
+        module->Error("Current NOQ path requires routing to commit to exactly one next output before queueing; multi-candidate VOQ selection is not implemented.");
+    }
+}
+
+} // namespace
+
 TrafficManager * TrafficManager::New(Configuration const & config,
                                      vector<Network *> const & net)
 {
@@ -106,6 +154,7 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
   
     _lookahead_routing = !config.GetInt("routing_delay");
     _noq = config.GetInt("noq");
+    _noq_no_uturn = config.GetInt("noq_no_uturn");
     if(_noq) {
         if(!_lookahead_routing) {
             Error("NOQ requires lookahead routing to be enabled.");
@@ -302,6 +351,8 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
     if (_queue_sample_period_cycles > 0) {
         _max_queue_length.resize(_nodes, vector<vector<int> >(_router[0][0]->NumInputs(), vector<int>(_vcs, 0)));
         _min_queue_length.resize(_nodes, vector<vector<int> >(_router[0][0]->NumInputs(), vector<int>(_vcs, 999999)));
+        _sum_queue_length.resize(_nodes, vector<vector<long long> >(_router[0][0]->NumInputs(), vector<long long>(_vcs, 0)));
+        _queue_sample_count = 0;
     }
 
 
@@ -1024,9 +1075,11 @@ void TrafficManager::_Step( )
                         int occ = r->GetBufferOccupancy(i, vc);
                         if (occ > _max_queue_length[n][i][vc]) _max_queue_length[n][i][vc] = occ;
                         if (occ < _min_queue_length[n][i][vc]) _min_queue_length[n][i][vc] = occ;
+                        _sum_queue_length[n][i][vc] += occ;
                     }
                 }
             }
+            _queue_sample_count++;
         }
     }
 
@@ -1109,14 +1162,22 @@ void TrafficManager::_Step( )
                                        << " (NOQ)." << endl;
                         }
                         set<OutputSet::sSetElement> const sl = cf->la_route_set.GetSet();
-                        assert(sl.size() == 1);
+                        RequireNOQSingleNextOutput(this, sl.size());
                         int next_output = sl.begin()->output_port;
-                        vc_count /= router->NumOutputs();
-                        vc_start += next_output * vc_count;
-                        vc_end = vc_start + vc_count - 1;
-                        assert(vc_start >= se.vc_start && vc_start <= se.vc_end);
-                        assert(vc_end >= se.vc_start && vc_end <= se.vc_end);
-                        assert(vc_start <= vc_end);
+                        int const slot_index =
+                            NOQSlotIndex(in_channel, next_output, router->NumOutputs(), _noq_no_uturn);
+                        int const slot_count =
+                            NOQSlotCount(in_channel, next_output, router->NumOutputs(), _noq_no_uturn);
+                        assert(slot_count > 0);
+                        if(slot_index >= 0) {
+                            vc_count /= slot_count;
+                            assert(vc_count > 0);
+                            vc_start += slot_index * vc_count;
+                            vc_end = vc_start + vc_count - 1;
+                            assert(vc_start >= se.vc_start && vc_start <= se.vc_end);
+                            assert(vc_end >= se.vc_start && vc_end <= se.vc_end);
+                            assert(vc_start <= vc_end);
+                        }
                     }
                     if(cf->watch) {
                         *gWatchOut << GetSimTime() << " | " << FullName() << " | "
@@ -1358,6 +1419,19 @@ void TrafficManager::_ClearStats( )
         }
         _hop_stats[c]->Clear();
 
+    }
+
+    if (_queue_sample_period_cycles > 0) {
+        for (int n = 0; n < _nodes; ++n) {
+            for (int i = 0; i < _router[0][n]->NumInputs(); ++i) {
+                for (int vc = 0; vc < _vcs; ++vc) {
+                    _max_queue_length[n][i][vc] = 0;
+                    _min_queue_length[n][i][vc] = 999999;
+                    _sum_queue_length[n][i][vc] = 0;
+                }
+            }
+        }
+        _queue_sample_count = 0;
     }
 
     _reset_time = _time;
@@ -2115,12 +2189,29 @@ void TrafficManager::DisplayStats(ostream & os) const {
                     if (_max_queue_length[n][i][vc] > 0 || _min_queue_length[n][i][vc] < 999999) {
                         os << "  Node " << n << " Port " << i << " VC " << vc 
                            << " -> max: " << _max_queue_length[n][i][vc] 
-                           << ", min: " << (_min_queue_length[n][i][vc] == 999999 ? 0 : _min_queue_length[n][i][vc]) << endl;
+                           << ", min: " << (_min_queue_length[n][i][vc] == 999999 ? 0 : _min_queue_length[n][i][vc])
+                           << ", avg: " << (double)_sum_queue_length[n][i][vc] / (double)_queue_sample_count << endl;
                     }
                 }
             }
         }
     }
+
+    int global_max_vc_occ = 0;
+    int global_max_buf_occ = 0;
+    for (int n = 0; n < _routers; ++n) {
+        for (int i = 0; i < _router[0][n]->NumInputs(); ++i) {
+            int buf_occ = _router[0][n]->GetMaxBufferOccupancy(i);
+            if (buf_occ > global_max_buf_occ) global_max_buf_occ = buf_occ;
+            for (int vc = 0; vc < _vcs; ++vc) {
+                int vc_occ = _router[0][n]->GetMaxBufferOccupancy(i, vc);
+                if (vc_occ > global_max_vc_occ) global_max_vc_occ = vc_occ;
+            }
+        }
+    }
+    os << "====== Peak Queue Occupancy Statistics (Absolute Max) ======" << endl;
+    os << "  Overall Max VC Occupancy = " << global_max_vc_occ << endl;
+    os << "  Overall Max Buffer Occupancy = " << global_max_buf_occ << endl;
 }
 
 void TrafficManager::DisplayOverallStats( ostream & os ) const {

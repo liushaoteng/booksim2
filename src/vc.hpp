@@ -70,6 +70,8 @@ private:
 
   bool _lookahead_routing;
 
+  int _max_occupancy;
+
 public:
   
   VC( const Configuration& config, int outputs,
@@ -125,6 +127,11 @@ public:
   inline int GetOccupancy() const
   {
     return (int)_buffer.size();
+  }
+
+  inline int GetMaxOccupancy() const
+  {
+    return _max_occupancy;
   }
 
   // ==== Debug functions ====

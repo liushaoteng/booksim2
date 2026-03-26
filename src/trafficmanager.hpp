@@ -106,6 +106,7 @@ protected:
   tRoutingFunction _rf;
   bool _lookahead_routing;
   bool _noq;
+  bool _noq_no_uturn;
 
   // ============ Injection queues ============ 
 
@@ -219,6 +220,8 @@ protected:
   int   _queue_sample_period_cycles;
   vector<vector<vector<int> > > _max_queue_length;
   vector<vector<vector<int> > > _min_queue_length;
+  vector<vector<vector<long long> > > _sum_queue_length;
+  long long _queue_sample_count;
 
 
   int   _include_queuing;

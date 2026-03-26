@@ -1470,14 +1470,13 @@ void dsl_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *output
   assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
 
   int out_port;
+  int cur = inject ? f->src : r->GetID();
+  int dest = f->dest;
 
-  if(inject) {
-    out_port = -1;
-  } else {
-    if ( in_channel == 2*gN ) {
+  if ( !inject && (in_channel == 2*gN) && f->ph == -1 ) {
       f->ph   = 0;  // Phase 0
       static map<int, int> dsl_rr_counter;
-      int src = r->GetID();
+      int src = cur;
       if (dsl_rr_counter.find(src) == dsl_rr_counter.end()) {
         dsl_rr_counter[src] = src;
       }
@@ -1485,27 +1484,21 @@ void dsl_mesh( const Router *r, const Flit *f, int in_channel, OutputSet *output
       dsl_rr_counter[src]++;
     }
 
-    if ( ( f->ph == 0 ) && ( r->GetID( ) == f->intm ) ) {
+    if ( ( f->ph == 0 ) && ( cur == f->intm ) ) {
       f->ph = 1; // Go to phase 1
     }
 
-    out_port = dor_next_mesh( r->GetID( ), (f->ph == 0) ? f->intm : f->dest );
+    out_port = dor_next_mesh( cur, (f->ph == 0) ? f->intm : f->dest );
 
-    if(r->GetID() != f->dest) {
-      int const available_vcs = (vcEnd - vcBegin + 1) / 2;
-      assert(available_vcs > 0);
-
-      if(f->ph == 0) {
-        vcEnd -= available_vcs;
-      } else {
-        assert(f->ph == 1);
-        vcBegin += available_vcs;
-      }
+    if(cur != dest) {
+      int const available_vcs = vcEnd - vcBegin + 1;
+      int const vcs_per_phase = available_vcs / 2;
+      if(f->ph == 0) vcEnd = vcBegin + vcs_per_phase - 1;
+      else vcBegin = vcBegin + vcs_per_phase;
     }
-  }
 
   outputs->Clear( );
-  outputs->AddRange( out_port, vcBegin, vcEnd );
+  outputs->AddRange( inject ? -1 : out_port, vcBegin, vcEnd );
 }
 
 //=============================================================
@@ -2109,76 +2102,85 @@ void racke_tree_mesh( const Router *r, const Flit *f, int in_channel, OutputSet 
   assert(((f->vc >= vcBegin) && (f->vc <= vcEnd)) || (inject && (f->vc < 0)));
 
   int out_port;
+  int cur = inject ? f->src : r->GetID();
+  int dest = f->dest;
 
-  if(inject) {
-    out_port = -1;
-  } else {
-    int cur = r->GetID();
-    int dest = f->dest;
+  if ( (inject || in_channel == 2*gN) && f->ph == -1 ) {
+      static map<pair<int, int>, int> racke_rr_counter;
+      pair<int, int> flow = make_pair(cur, dest);
+      if (racke_rr_counter.find(flow) == racke_rr_counter.end()) {
+        racke_rr_counter[flow] = (cur + dest) % (2 * gK);
+      }
+      int rr_val = racke_rr_counter[flow]++;
+      int src_row = cur / gK;
+      int src_col = cur % gK;
+      int dest_row = dest / gK;
+      int dest_col = dest % gK;
 
-    if ( in_channel == 2*gN ) {
-      // Injected: Decide Rule 2 or Rule 3
-      if ( (f->pid % 2) == 0 ) {
-        // Rule 2: Row-Scatter (H -> V -> H)
-        int src_y = cur / gK;
-        int dest_y = dest / gK;
-        if (src_y != dest_y) {
-          f->ph = 0; // Phase 0: X scatter in current row
-          f->intm = src_y * gK + ((f->pid / 2) % gK);
-        } else {
-          f->ph = 2; // Direct X
+      // Alternate the two Racke rule families for every packet so each
+      // (src, dest) flow converges to the 1/2 H-V-H + 1/2 V-H-V split
+      // assumed by the theory scripts, even for same-row/same-column pairs.
+      int rule = (rr_val % 2 == 0) ? 2 : 3;
+
+      if ( rule == 2 ) {
+        // Rule 2 logic: X-Y-X
+        if (src_row == dest_row) {
+          f->ph = 2;
           f->intm = dest;
+        } else {
+          f->ph = 0;
+          f->intm = src_row * gK + ((rr_val / 2) % gK); // use rr_val for intermediate selection
         }
-      } else {
-        // Rule 3: Col-Scatter (V -> H -> V)
-        int src_x = cur % gK;
-        int dest_x = dest % gK;
-        if (src_x != dest_x) {
-          f->ph = 10; // Phase 10: Y scatter in current column
-          f->intm = ((f->pid / 2) % gK) * gK + src_x;
-        } else {
-          f->ph = 12; // Direct Y
+      } else { // rule == 3
+        // Rule 3 logic: Y-X-Y
+        if (src_col == dest_col) {
+          f->ph = 12;
           f->intm = dest;
+        } else {
+          f->ph = 10;
+          f->intm = ((rr_val / 2) % gK) * gK + src_col;
         }
       }
     }
 
-
-    // Phase transitions
     if ( f->ph == 0 && cur == f->intm ) {
-        f->ph = 1; // Now move to target row (Y)
-        f->intm = (dest / gK) * gK + (f->intm % gK); // stay in current column
+        f->ph = 1;
+        f->intm = (f->dest / gK) * gK + (f->intm % gK);
     } else if ( f->ph == 1 && cur == f->intm ) {
-        f->ph = 2; // Now move to final dest (X)
-        f->intm = dest;
+        f->ph = 2;
+        f->intm = f->dest;
     } else if ( f->ph == 10 && cur == f->intm ) {
-        f->ph = 11; // Now move to target column (X)
-        f->intm = (f->intm / gK) * gK + (dest % gK); // stay in current row
+        f->ph = 11;
+        f->intm = (f->intm / gK) * gK + (f->dest % gK);
     } else if ( f->ph == 11 && cur == f->intm ) {
-        f->ph = 12; // Now move to final dest (Y)
-        f->intm = dest;
+        f->ph = 12;
+        f->intm = f->dest;
     }
 
-    // Determine out_port using DOR
     out_port = dor_next_mesh( cur, f->intm );
-
-    if(r->GetID() != f->dest) {
-      int const available_vcs = vcEnd - vcBegin + 1;
-      int vcs_per_phase = available_vcs / 3;
-      if (vcs_per_phase <= 0) vcs_per_phase = 1;
-
-      int sub_ph = 0;
-      if (f->ph == 0 || f->ph == 10) sub_ph = 0;
-      else if (f->ph == 1 || f->ph == 11) sub_ph = 1;
-      else sub_ph = 2;
-
-      vcBegin += sub_ph * vcs_per_phase;
-      if (sub_ph < 2) vcEnd = vcBegin + vcs_per_phase - 1;
+    if (out_port == 4 && cur != f->dest) {
+       // Force move if we hit intermediate node but not destination
+       // This can happen if intm == cur. DOR typically moves X then Y.
+       // In mesh, ports 0,1,2,3 are cardinal. Pick one based on dest.
+       if (f->dest % gK != cur % gK) out_port = (f->dest % gK > cur % gK) ? 0 : 1;
+       else out_port = (f->dest / gK > cur / gK) ? 2 : 3;
     }
-  }
+
+    if(!inject && (cur != f->dest)) {
+      int const available_vcs = vcEnd - vcBegin + 1;
+      int const vcs_per_phase = available_vcs / 3;
+      int sub_ph = -1;
+      if (f->ph >= 0 && f->ph <= 2) sub_ph = f->ph;
+      else if (f->ph >= 10 && f->ph <= 12) sub_ph = (f->ph - 10);
+
+      if (sub_ph != -1) {
+        vcBegin += sub_ph * vcs_per_phase;
+        vcEnd = vcBegin + vcs_per_phase - 1;
+      }
+    }
 
   outputs->Clear( );
-  outputs->AddRange( out_port, vcBegin, vcEnd );
+  outputs->AddRange( inject ? -1 : out_port, vcBegin, vcEnd );
 }
 
 //=============================================================
@@ -2258,6 +2260,7 @@ void InitializeRoutingMap( const Configuration & config )
   //  gRoutingFunctionMap["limited_adapt_mesh"] = &limited_adapt_mesh;
 
   gRoutingFunctionMap["valiant_mesh"]  = &valiant_mesh;
+  gRoutingFunctionMap["dsl"]       = &dsl_mesh;
   gRoutingFunctionMap["dsl_mesh"]  = &dsl_mesh;
   gRoutingFunctionMap["valiant_torus"] = &valiant_torus;
   gRoutingFunctionMap["valiant_ni_torus"] = &valiant_ni_torus;
@@ -2269,5 +2272,6 @@ void InitializeRoutingMap( const Configuration & config )
   gRoutingFunctionMap["chaos_mesh"]  = &chaos_mesh;
   gRoutingFunctionMap["chaos_torus"] = &chaos_torus;
 
+  gRoutingFunctionMap["racke_tree"]      = &racke_tree_mesh;
   gRoutingFunctionMap["racke_tree_mesh"] = &racke_tree_mesh;
 }

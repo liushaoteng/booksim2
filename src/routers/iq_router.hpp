@@ -103,6 +103,7 @@ class IQRouter : public Router {
   vector<int> _switch_hold_vc;
 
   bool _noq;
+  bool _noq_no_uturn;
   vector<vector<int> > _noq_next_output_port;
   vector<vector<int> > _noq_next_vc_start;
   vector<vector<int> > _noq_next_vc_end;
@@ -166,6 +167,8 @@ public:
   virtual int GetUsedCredit(int o) const;
   virtual int GetBufferOccupancy(int i) const;
   virtual int GetBufferOccupancy(int input, int vc) const;
+  virtual int GetMaxBufferOccupancy(int i) const;
+  virtual int GetMaxBufferOccupancy(int input, int vc) const;
 
 #ifdef TRACK_BUFFERS
   virtual int GetUsedCreditForClass(int output, int cl) const;

@@ -47,6 +47,54 @@
 #include "switch_monitor.hpp"
 #include "buffer_monitor.hpp"
 
+namespace {
+
+int NOQSlotIndex(int input_port, int next_output_port, int num_outputs, bool no_u_turn)
+{
+  assert(next_output_port >= 0);
+  assert(next_output_port < num_outputs);
+
+  if(!no_u_turn) {
+    return next_output_port;
+  }
+
+  int const local_port = num_outputs - 1;
+  if(input_port == local_port) {
+    if(next_output_port == local_port) {
+      return -1;
+    }
+    return next_output_port;
+  }
+
+  assert(input_port >= 0);
+  assert(input_port < num_outputs);
+  assert(next_output_port != input_port);
+  return (next_output_port < input_port) ? next_output_port : (next_output_port - 1);
+}
+
+int NOQSlotCount(int input_port, int next_output_port, int num_outputs, bool no_u_turn)
+{
+  if(!no_u_turn) {
+    return num_outputs;
+  }
+
+  int const local_port = num_outputs - 1;
+  if((input_port == local_port) && (next_output_port == local_port)) {
+    return num_outputs;
+  }
+
+  return num_outputs - 1;
+}
+
+void RequireNOQSingleNextOutput(Module const *module, size_t route_count)
+{
+  if(route_count != 1) {
+    module->Error("Current NOQ path requires routing to commit to exactly one next output before queueing; multi-candidate VOQ selection is not implemented.");
+  }
+}
+
+} // namespace
+
 IQRouter::IQRouter( Configuration const & config, Module *parent, 
 		    string const & name, int id, int inputs, int outputs )
 : Router( config, parent, name, id, inputs, outputs ), _active(false)
@@ -145,12 +193,24 @@ IQRouter::IQRouter( Configuration const & config, Module *parent,
     _sw_rr_offset[i] = i % _input_speedup;
   
   _noq = config.GetInt("noq") > 0;
+  _noq_no_uturn = config.GetInt("noq_no_uturn") > 0;
   if(_noq) {
     if(_routing_delay) {
       Error("NOQ requires lookahead routing to be enabled.");
     }
     if(_vcs < _outputs) {
       Error("NOQ requires at least as many VCs as router outputs.");
+    }
+    if(_noq_no_uturn && (config.GetStr("routing_function") == "racke_tree")) {
+      int const required_multiple = 3 * (_outputs - 1);
+      if((_outputs <= 1) || (_vcs % required_multiple != 0)) {
+        ostringstream err;
+        err << "Racke NOQ with no-U-turn VC partitioning requires num_vcs divisible by "
+            << required_multiple
+            << " (3 phases x " << (_outputs - 1)
+            << " non-local output groups).";
+        Error(err.str());
+      }
     }
   }
   _noq_next_output_port.resize(_inputs, vector<int>(_vcs, -1));
@@ -599,7 +659,9 @@ void IQRouter::_VCAllocEvaluate( )
     bool cred = false;
     bool reserved = false;
 
-    assert(!_noq || (setlist.size() == 1));
+    if(_noq) {
+      RequireNOQSingleNextOutput(this, setlist.size());
+    }
 
     for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
 	iset != setlist.end();
@@ -1399,7 +1461,9 @@ void IQRouter::_SWAllocEvaluate( )
     
     set<OutputSet::sSetElement> const setlist = route_set->GetSet();
     
-    assert(!_noq || (setlist.size() == 1));
+    if(_noq) {
+      RequireNOQSingleNextOutput(this, setlist.size());
+    }
 
     for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
 	iset != setlist.end();
@@ -1747,7 +1811,9 @@ void IQRouter::_SWAllocEvaluate( )
 	  bool full = true;
 	  bool reserved = false;
 
-	  assert(!_noq || (setlist.size() == 1));
+	  if(_noq) {
+	    RequireNOQSingleNextOutput(this, setlist.size());
+	  }
 
 	  for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
 	      iset != setlist.end();
@@ -1898,7 +1964,9 @@ void IQRouter::_SWAllocUpdate( )
 	const OutputSet * route_set = cur_buf->GetRouteSet(vc);
 	set<OutputSet::sSetElement> const setlist = route_set->GetSet();
 	
-	assert(!_noq || (setlist.size() == 1));
+	if(_noq) {
+	  RequireNOQSingleNextOutput(this, setlist.size());
+	}
 	
 	for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
 	    iset != setlist.end();
@@ -2357,7 +2425,7 @@ void IQRouter::_UpdateNOQ(int input, int vc, Flit const * f) {
   assert(f->vc == vc);
   assert(f->head);
   set<OutputSet::sSetElement> sl = f->la_route_set.GetSet();
-  assert(sl.size() == 1);
+  RequireNOQSingleNextOutput(this, sl.size());
   int out_port = sl.begin()->output_port;
   const FlitChannel * channel = _output_channels[out_port];
   const Router * router = channel->GetSink();
@@ -2366,18 +2434,31 @@ void IQRouter::_UpdateNOQ(int input, int vc, Flit const * f) {
     OutputSet nos;
     _rf(router, f, in_channel, &nos, false);
     sl = nos.GetSet();
-    assert(sl.size() == 1);
+    RequireNOQSingleNextOutput(this, sl.size());
     OutputSet::sSetElement const & se = *sl.begin();
     int next_output_port = se.output_port;
     assert(next_output_port >= 0);
     assert(_noq_next_output_port[input][vc] < 0);
     _noq_next_output_port[input][vc] = next_output_port;
-    int next_vc_count = (se.vc_end - se.vc_start + 1) / router->NumOutputs();
-    int next_vc_start = se.vc_start + next_output_port * next_vc_count;
+    int const slot_index =
+      NOQSlotIndex(in_channel, next_output_port, router->NumOutputs(), _noq_no_uturn);
+    int const slot_count =
+      NOQSlotCount(in_channel, next_output_port, router->NumOutputs(), _noq_no_uturn);
+    assert(slot_count > 0);
+    int next_vc_start;
+    int next_vc_end;
+    if(slot_index >= 0) {
+      int next_vc_count = (se.vc_end - se.vc_start + 1) / slot_count;
+      assert(next_vc_count > 0);
+      next_vc_start = se.vc_start + slot_index * next_vc_count;
+      next_vc_end = next_vc_start + next_vc_count - 1;
+    } else {
+      next_vc_start = se.vc_start;
+      next_vc_end = se.vc_end;
+    }
     assert(next_vc_start >= 0 && next_vc_start < _vcs);
     assert(_noq_next_vc_start[input][vc] < 0);
     _noq_next_vc_start[input][vc] = next_vc_start;
-    int next_vc_end = se.vc_start + (next_output_port + 1) * next_vc_count - 1;
     assert(next_vc_end >= 0 && next_vc_end < _vcs);
     assert(_noq_next_vc_end[input][vc] < 0);
     _noq_next_vc_end[input][vc] = next_vc_end;
@@ -2388,4 +2469,15 @@ void IQRouter::_UpdateNOQ(int input, int vc, Flit const * f) {
 		 << " (NOQ)." << endl;
     }
   }
+}
+
+int IQRouter::GetMaxBufferOccupancy(int i) const {
+  assert((i >= 0) && (i < _inputs));
+  return _buf[i]->GetMaxOccupancy();
+}
+
+int IQRouter::GetMaxBufferOccupancy(int i, int vc) const {
+  assert((i >= 0) && (i < _inputs));
+  assert((vc >= 0) && (vc < _vcs));
+  return _buf[i]->GetMaxOccupancy(vc);
 }
