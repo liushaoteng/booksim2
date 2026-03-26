@@ -40,7 +40,7 @@ src/booksim tests/data/inputs/configs/dsl_3x3.config
 Expected signals:
 
 - the config is accepted without a routing-function error
-- the run reaches `Simulation converged`
+- the run exits cleanly without `Simulation unstable`
 - the output includes accepted-rate and latency summaries
 
 ## Batch Verification Script
